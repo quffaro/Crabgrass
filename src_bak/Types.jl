@@ -1,9 +1,15 @@
+###########################################
+## TRIPLE FUNCTION
+################################
 mutable struct Triple 
     qty::Float64
     max::Float64
     mod::Float64
 end 
 
+############################################
+## TRIPLE METHODS
+############################################
 function addt(x::Triple, y::Float64)::Triple
     x.qty = min(x.qty + y, x.max)
     return x
@@ -24,6 +30,9 @@ function subt!(x::Triple, y::Float64)::Triple
     return x
 end
 
+############################################
+## QUADRUPLE METHODS
+############################################
 mutable struct Quadruple
     mtur::Int
     freq::Int

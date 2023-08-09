@@ -1,3 +1,46 @@
+############################################
+## MODEL FUNCTIONS
+############################################
+function initialize(; numcrabs = 1, dim = (40, 40))
+    # space
+    space = GridSpace(dim, periodic = false)
+    # properties 
+    prop = Dict(:tick          => 0,
+                :grass_density => 0.1,
+                :spore_density => 0.1,
+                :water_density => 0.1,
+                :water_ratio   => 0.5,
+                :tox           => zeros(dim...),
+                :water         => spzeros(dim...),
+                :sunlight      => init_sunlight(dim[1])) ## TODO
+    # model 
+    model = ABM(Organism, space, properties=prop)
+
+    # generate terrain
+    generate_soil_moisture!(model; vol=60, steps=10)
+   
+    ## TODO: parameters in agent init functions should be more flexible
+
+    # # populate grass 
+    for pos in init_sparray(dim, model.grass_density) 
+        add_agent_pos!(init_grass(model, pos), model)
+    end
+
+    # # populate fungus
+    for pos in init_sparray(dim, model.spore_density) 
+        add_agent_pos!(init_fungus(model, pos), model)
+    end
+
+    # # populate crabs
+    for _ in 1:numcrabs 
+        add_agent_single!(init_crab(model, (10,10)), model)
+    end
+
+    return model
+end
+
+
+
 # MODEL METHODS
 function generate_soil_moisture!(model::ABM; vol::Int=30, steps::Int=5)
     # dims = spacesize(model)

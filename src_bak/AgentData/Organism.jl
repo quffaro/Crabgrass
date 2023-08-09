@@ -1,5 +1,18 @@
 module Organism
 
+@agent Organism GridAgent{2} begin
+    type::Symbol
+    status::Status
+    age::Int 
+    mass::Float64
+    repro::Quadruple
+    nrg::Triple
+    hyd::Triple
+    tox::Triple
+    mot::Triple
+end
+
+
 #############################################
 ## ORGANISM METHODS
 #############################################

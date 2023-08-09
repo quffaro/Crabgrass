@@ -1,4 +1,6 @@
+############################################
 ## PLOTTING
+############################################
 function color(agent)
     @match agent.type begin 
         :crab   => @match agent.status.status begin 
