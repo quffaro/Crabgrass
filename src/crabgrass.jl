@@ -1,4 +1,4 @@
-import Pkg; Pkg.add(["CairoMakie","Plots","StructArrays", "Match", "Pipe", "Parameters","Permutations"])
+import Pkg; Pkg.add(["CairoMakie","Plots","StructArrays","Match","Pipe","Parameters","Permutations"])
 
 using Agents
 using StructArrays, Match, Random, Pipe, SparseArrays, Parameters, StatsBase 
@@ -125,7 +125,7 @@ function crab_act_walking!(crab::Organism, model::ABM)
 end
 
 function crab_walk_carefully!(crab::Organism, model::ABM)
-    randomwalk!(crab,model,1)
+    walk!(crab,rand,model)
 end
 
 ############################################
@@ -176,8 +176,8 @@ end
 ############################################
 function generate_terrain!(model::ABM; vol::Int=30, steps::Int=5)
     # dims = spacesize(model)
-    # model.water = sparseN(dims[1], dims[2], vol=15)
-    model.water = sparseN(spacesize(model)...; vol=vol)
+    model.water = sparseN(dim[1], dim[2], vol=15)
+    # model.water = sparseN(model.spacesize...; vol=vol)
     for _ in 1:steps
         diffuse!(model, :water, model.water_ratio)
     end
@@ -237,36 +237,25 @@ dim=(60,60)
 
 model = initialize(numcrabs=numcrabs,dim=dim)
 
-
 # permutation vector
 l=last(size(model.sunlight))
 p=pushfirst!(Vector(1:l-1),l)
 
 ############################################
-##
+## PLOT
 ############################################
-movie = Any[];
-heatarray = :tox
-scatterkwargs = (colorrange = (0, 5), colormap = :magma)
-for i in 1:5
-     step!(model,agent_step!,model_step!,1)
-     fig, ax, abmobs = abmplot(model)
-end
-
-
+using CairoMakie, Plots
 using Dates
+
 moviename = string("movie_",Dates.format(now(), "MMHH"),"_crabs_",numcrabs,".mp4") 
+abmvideo(moviename,model,agent_step!,model_step!) 
 
-## looping
 
-# abmvideo(
-#          name, model, agent_step!, model_step!;
-#          framerate=4, frames=frames,
-#          title="Movie",
-#          ac=color, am=marker, as=agent_size,
-#          heatarray, heatkwargs
-#         )
+# anim = @animate for i in 1:5
+#      step!(model,agent_step!,model_step!,1)
+#      abmplot(model)
+# end
 
-print(movie,"\n")
+# gif(anim,moviename,fps=30)
 
 
