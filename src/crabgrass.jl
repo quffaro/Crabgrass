@@ -296,22 +296,6 @@ function grass_reproduce!(grass::Organism, model::ABM) ## TODO: change to NTuple
         add_agent_pos!(init_grass(model, viable[1]), model)
         subt!(grass.energy, 1.0)
     end
-        # if !isempty(viable)
-    #     # new grass stats
-    #     toxin_bias = (rand() - 0.5*(grass.toxicity.qty/grass.toxicity.max))/200
-    #     new_tox = Triple(0, grass.toxicity.max + toxin_bias, 1-grass.toxicity.mod*(1-rand()))
-    #     # new pos 
-    #     new_pos = @pipe viable |> sample(_, rand((1,2))) |> unique
-        
-    #     # use to remove spores
-    #     # occupants = agents_in_position(new_pos, model)
-    #     # [kill_agent!(x, model) for x in occupants]
-
-    #     for p in new_pos
-    #         @pipe init_grass(model, p; tox=new_tox) |> add_agent_pos!(_, model)
-    #         subt!(grass.energy, 1.0)
-    #     end
-    # end
 end       
 
 
