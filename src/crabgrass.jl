@@ -1,4 +1,4 @@
-import Pkg; Pkg.add(["CairoMakie","Plots","StructArrays","Match","Pipe","Parameters","Permutations"])
+import Pkg; Pkg.add(["CairoMakie","Plots","StructArrays","Match","Pipe","Parameters","Permutations","Suppressor"])
 
 using Agents
 using StructArrays, Match, Random, Pipe, SparseArrays, Parameters, StatsBase 
@@ -20,6 +20,11 @@ end
 function sparseN(X::Int, Y::Int; vol::Int=9, nz::Int=sqrtint(X))
     sparse(rand(1:X, nz), rand(1:Y, nz), float(rand(1:vol, nz)), X, Y)
 end
+
+mutable struct Status
+    action::Symbol
+    focus::Int # TODO: Union(Int, Nothing)
+end 
 
 #############################################
 ## TRIPLE FUNCTION
@@ -53,10 +58,6 @@ function subt!(x::Triple, y::Float64)::Triple
     return x
 end
 
-mutable struct Status
-    action::Symbol
-    focus::Int # TODO: Union(Int, Nothing)
-end 
 
 ############################################
 ## ORGANISM
@@ -66,14 +67,35 @@ end
     status::Status
     age::Int 
     mass::Float64
+    energy::Triple
+    toxicity::Triple
 end
 
-Crab(;id,pos,status,age,mass)=Organism(id,pos,:crab,status,age,mass)
+Crab(;id,pos,status,age,mass,energy,toxicity)=
+Organism(id,pos,:crab,status,age,mass,energy,toxicity)
+Grass(;id,pos,status,age,mass,energy,toxicity)= 
+Organism(id,pos,:grass,status,age,mass,energy,toxicity)
 
-function init_crab(model::ABM,pos::NTuple{2,Int64})
+############################################
+## ORGANISM METHODS
+############################################
+
+############################################
+## ORGANISM FUNCTIONS
+############################################
+
+function init_crab(model::ABM,pos::NTuple{2,Int64}; tox::Triple=Triple(1,5,1))
     id=nextid(model)
     status=Status(:walking,id)
-    Crab(;id=id,pos=pos,status=status,age=0,mass=5.0)
+    Crab(;id=id,pos=pos,status=status,age=0,mass=5.0
+         ,energy=Triple(1,8,1),toxicity=tox)
+end
+
+function init_grass(model::ABM,pos::NTuple{2,Int64}; tox::Triple=Triple(1,5,0.5))
+    id=nextid(model)
+    status=Status(:sessile,id)
+    Grass(;id=id,pos=pos,status=status,age=0,mass=1.0
+          ,energy=Triple(1,8,1),toxicity=tox)
 end
 
 ##
@@ -87,16 +109,27 @@ function those_nearby(agent::Organism,model::ABM)::Vector{Organism}
 end
     
 ##
-function nearby_grass(agent::Organism,model::ABM)::Vector{NTuple{2,Int}}
+function nearby_grass(agent::Organism,model::ABM)::Vector{Organism}
     return filter(x->x.type==:grass,those_nearby(agent,model))
 end
+
+##
+function get_vacancies(agent::Organism, model::ABM)::Vector{NTuple{2, Int}}
+    close = @pipe those_nearby(agent, model) .|> getfield(_, :pos)
+    spots = @pipe nearby(agent, model) |> setdiff(_, close)
+    return spots 
+end
+
 
 ############################################
 ## STEP METHODS
 ############################################
 function agent_step!(organism::Organism, model::ABM)
+    organism.age += 1
+
     @match organism.type begin
         :crab => crab_step!(organism,model)
+        :grass => grass_step!(organism,model)
     end
 end
 
@@ -104,13 +137,38 @@ end
 ## CRAB STEP
 ############################################
 function crab_step!(crab::Organism, model::ABM)
-    
+
+    crab_begin!(crab,model)
+
     @match crab.status.action begin
         :walking => crab_act_walking!(crab,model)
         :eating => crab_act_eating!(crab,model)
+        :dead => remove_agent!(crab, model)
         _ => nothing
     end 
 end 
+
+function crab_begin!(crab::Organism,model::ABM)
+    crab.age += 1
+
+    ## buffetted by toxins in soil
+
+    ## dead?
+    if is_crab_dead(crab,model)
+        # remove_agent!(crab, model)
+        crab.status.action = :dead
+        print("Crab ", crab.id, " died at age ", crab.age)
+    end
+
+    ## reproduce?
+    if can_crab_reproduce(crab,model)
+        crab_act_reproduce!(crab,model)
+    end
+end
+
+function crab_set_walking!(crab::Organism)
+    crab.status = Status(:walking, 0)
+end
 
 function crab_act_walking!(crab::Organism, model::ABM)
     food = nearby_grass(crab,model)
@@ -120,12 +178,149 @@ function crab_act_walking!(crab::Organism, model::ABM)
         model[food_id].status=Status(:defending,crab.id)
     else
         crab.status.action=:walking
-        crab_walk_carefully!(crab,model)
+        walk!(crab,rand,model)
+        # crab_walk_carefully!(crab,model)
     end 
 end
 
-function crab_walk_carefully!(crab::Organism, model::ABM)
-    walk!(crab,rand,model)
+# function crab_walk_carefully!(crab::Organism, model::ABM)
+#     walk!(crab,rand,model)
+# end
+
+function crab_act_eating!(crab::Organism, model::ABM)
+    food = try model[crab.status.focus] catch; 0 end
+
+    atk = crab.mass
+
+    if food == 0
+        crab_set_walking!(crab)
+    elseif food.mass <= atk
+        crab.mass += max(food.mass, 0.1)
+        remove_agent!(food,model)
+        crab_set_walking!(crab)
+    else
+        crab.mass += atk
+        food.mass -= atk
+    end
+
+end
+
+function crab_act_reproduce!(crab::Organism, model::ABM)
+    spots = get_vacancies(crab,model)
+    if !isempty(spots)
+        @pipe init_crab(model,rand(spots)) |> add_agent_pos!(_,model)
+        crab.mass *= 0.25
+    end
+end
+
+function is_crab_dead(crab::Organism, model::ABM)
+    crab.mass <= 0 || crab.age > 30
+end
+
+function can_crab_reproduce(crab::Organism, model::ABM)
+    crab.mass > 10 && crab.age > 5
+end
+
+############################################
+## GRASS STEP
+############################################
+function grass_step!(grass::Organism, model::ABM) 
+    grass_begin!(grass,model)
+
+    near = nearby(grass, model)
+    @match grass.status.action begin
+        :sessile => grass_act_sessile!(grass,model)
+        :defending => grass_act_defending!(grass,model)
+        _ => nothing
+    end
+end
+
+function grass_begin!(grass::Organism, model::ABM)
+    grass.age += 1
+ 
+    if is_grass_dead(grass, model)
+        # set_status_dead!(grass, model)
+        remove_agent!(grass,model)
+    end
+
+    near = nearby(grass, model) 
+    if can_grass_reproduce(grass, model)
+        grass_reproduce!(grass, model)
+    end
+end
+
+
+function grass_act_sessile!(grass::Organism, model::ABM)
+    new_hyd = 0.5 + model.water[grass.pos...]
+    
+    ## grow
+    grass.mass += new_hyd |> abs
+end
+
+function grass_act_defending!(grass::Organism, model::ABM)
+    near = nearby(grass, model)
+    c, r, u = 0, grass.toxicity.mod, near |> length |> inv 
+    for pos in near 
+        qty = u*(model.tox[pos...] ⊕ grass.toxicity.qty)(r)
+        model.tox[pos...] += qty 
+        c                 += qty
+    end
+    grass.toxicity.qty -= c
+end
+
+function grass_reproduce!(grass::Organism, model::ABM) ## TODO: change to NTuple
+    
+    viable = pos_grass_reproduce(grass, model)
+    if !isempty(viable)
+        # p = sample(viable, rand(1,2)) |> unique
+        add_agent_pos!(init_grass(model, viable[1]), model)
+        subt!(grass.energy, 1.0)
+    end
+        # if !isempty(viable)
+    #     # new grass stats
+    #     toxin_bias = (rand() - 0.5*(grass.toxicity.qty/grass.toxicity.max))/200
+    #     new_tox = Triple(0, grass.toxicity.max + toxin_bias, 1-grass.toxicity.mod*(1-rand()))
+    #     # new pos 
+    #     new_pos = @pipe viable |> sample(_, rand((1,2))) |> unique
+        
+    #     # use to remove spores
+    #     # occupants = agents_in_position(new_pos, model)
+    #     # [kill_agent!(x, model) for x in occupants]
+
+    #     for p in new_pos
+    #         @pipe init_grass(model, p; tox=new_tox) |> add_agent_pos!(_, model)
+    #         subt!(grass.energy, 1.0)
+    #     end
+    # end
+end       
+
+
+############################################
+## GRASS FUNCTIONS
+############################################
+function is_grass_dead(grass::Organism, model::ABM)
+    avg_tox = [model.tox[x...] for x in nearby(grass,model)] |> mean
+    grass.mass <= 0 || 
+    grass.age >= 100 || 
+    avg_tox > grass.mass*10
+end
+
+function can_grass_reproduce(grass::Organism, model::ABM)
+    avg_tox = [model.tox[x...] for x in nearby(grass, model)] |> mean
+    grass.age % 49 == 0 && 
+    avg_tox < 1 
+    # && model.sunlight[grass.pos...] > 0.5
+end
+
+function pos_grass_reproduce(grass::Organism, model::ABM)
+    return filter(pos -> model.tox[pos...] < 0.3, get_grass_vacancies(grass, model)) 
+end
+
+## TODO do we use this elsewhere
+function get_grass_vacancies(agent::Organism, model::ABM)::Vector{NTuple{2, Int}}
+    close = @pipe filter(x -> x.status.action != :spore, those_nearby(agent, model)) .|> getfield(_, :pos)
+    spots = @pipe nearby(agent, model) |> setdiff(_, close)
+    return spots 
 end
 
 ############################################
@@ -153,9 +348,9 @@ function initialize(; numcrabs = 1, dim = (40, 40))
     ## TODO: parameters in agent init functions should be more flexible
 
     # # populate grass 
-    # for pos in init_sparray(dim, model.grass_density) 
-    #     add_agent_pos!(init_grass(model, pos), model)
-    # end
+    for pos in init_sparray(dim, model.grass_density) 
+        add_agent_pos!(init_grass(model, pos), model)
+    end
 
     # # populate fungus
     # for pos in init_sparray(dim, model.spore_density) 
@@ -247,8 +442,33 @@ p=pushfirst!(Vector(1:l-1),l)
 using CairoMakie, Plots
 using Dates
 
-moviename = string("movie_",Dates.format(now(), "MMHH"),"_crabs_",numcrabs,".mp4") 
-abmvideo(moviename,model,agent_step!,model_step!) 
+function color(agent)
+    @match agent.type begin
+        :crab => if agent.mass >= 10
+            :red
+        else 
+            :orange
+        end
+        :grass => :green
+    end
+end
+
+function marker(agent)
+    @match agent.type begin
+        :crab => :rect
+        :grass => :circle
+    end
+end
+
+heatarray = :tox
+
+upperlimit = maximum(model.water)
+heatkwargs = (colorrange = (0, upperlimit), colormap = :magma)
+
+moviename = string("movie_",Dates.format(now(), "HHMM"),"_crabs_",numcrabs,".mp4") 
+abmvideo(moviename,model,agent_step!,model_step!;
+        framerate=4,frames=50,title="Crabgrass!"
+       ,ac=color,am=marker,heatarray,heatkwargs) 
 
 
 # anim = @animate for i in 1:5
